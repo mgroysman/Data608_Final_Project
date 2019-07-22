@@ -1,0 +1,1535 @@
+---
+title: "Final Project. Data608. USA Migration/Geographic Mobility"
+author: "Mikhail Groysman"
+date: "May 11, 2019"
+output:
+  bookdown::html_document2:
+    theme: cerulean
+    toc: true
+    toc_depth: 5
+    code_folding: hide
+bibliography: mycitations.bib
+link-citations: yes    
+---
+
+#Motivation
+
+USA is a country of migrants. Immigration is a hot political topic. Being an immigrant myself, I can relate to the topic on personal level. However, there is another side to the migration history of USA - it is a domestic interstate migration, which started with colonial times as first settlers moved westward. And this migration continues to this day. 
+
+There are many reasons for people moving from one state to another. I would like to explore the state of USA migration/Geographic mobility. And yes, I do have personal interest in this topic myself as well. I could be one of the these domestic migrants one day. Where do other Americans move? Why? How many? For me, these are very interesting questions, which I hope will be answered by this visualization.
+
+#Desired Outcome
+
+At the end of this project, I expect to come with:
+
+1) Country level summary of migration 
+
+2) For each state, migration summary 
+
+I would like to answer the flowing questions:
+
+1) Variance by state, the percentage of people who choose to move vs who preferred to reside in the state of their birth
+
+2) Effect of migration on state population
+
+3) Which states drive migration and which states gain/lose from migration
+
+These are just some of the questions that should be answered.
+
+
+#Current Knowledge on the Subject
+
+USA experienced a few internal mass migrations[@wiki1]:
+
+1) Toward West Coast - mid of 19 century
+2) Afro-Americans migration from South to Northeast in beginning of 20ht century and again after WW2
+3) Depopulation of Great Plains during 20th century
+4) Migration to Sun Belt - during Great Depression and after WW2
+5) Migration from California in recent years
+
+The reasons for migration are multiple. Some of the major ones are[@wiki2]:
+
+1) Work-related factors 
+  a) Job transfers
+  b) Job loss
+  c) Job search
+  d) Wanting to be closer to work
+  
+2) Housing factors
+  a) Wanting to own a home (chart of average house price by state vs migration)
+  b) Seeking better home or neighborhood
+  c) Wanting a cheaper housing
+  
+3) Other factors
+  a) Attending college
+  b) Change in marital status
+  c) Retirement
+  d) Health-related moves
+  
+#Data Sources
+
+The data source, I am using for the visualization, is USA Census, American Community Survey, 2017 (the latest available):
+
+https://www.census.gov/topics/population/migration/data/tables/acs.html
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+
+library(dplyr)
+
+library(ggrepel)
+
+library(plyr)
+
+library(readr)
+
+library(stringr)
+
+
+library(tidyr) 
+
+library(ggplot2)
+
+library(usmap)
+
+library(readxl)
+
+library(ggthemes) 
+
+library(XML)
+
+library(RCurl)
+
+library(ggpubr)
+
+library(knitr)
+
+library(kableExtra)
+
+library(factoextra)
+
+library(NbClust)
+
+```
+
+
+```{r, echo=FALSE,echo=FALSE, message=FALSE, warning=FALSE}
+
+# reading the csv file
+
+acsf<-'https://raw.githubusercontent.com/mgroysman/Data608_FinalProject/master/State_of_Residence_By_Place_of_Birth_Table%20_2017.csv'
+
+headers = read.csv(acsf, skip = 6, header = F, nrows = 1, as.is = T)
+df = read.csv(acsf, skip = 9, header = F)
+colnames(df)= headers
+df
+dim(df)
+df
+df1<-df[,c(1,2,129)]
+df1
+# renaming the first column
+colnames(df1) <- c("State","Population","ForeignPop")
+
+names(df)[2]<-"Population"
+
+dcol<-c()
+
+for (i in (0:11)) {
+
+for (j in seq(2, 11, by=2)) {
+  dcol<-c(dcol,1+i*11+j)
+}
+  dcol<-c(dcol,12+i*11)
+}
+
+dcol<-dcol[-c(71,72)]
+dcol<-c(dcol,c(118:132))
+
+df_clean<-df[,-dcol]
+
+df_clean[, 2:54] <- sapply(df_clean[, 2:54], as.character)
+df_clean[, 2:54] <- sapply(df_clean[, 2:54], function(x) as.numeric(gsub(",", "",x)))
+df_clean<-df_clean[complete.cases(df_clean), ]
+
+df_clean[,1]<-as.character(df_clean[,1])
+
+df_clean1<-df_clean[-c(70:79),]
+
+kable(head(df_clean1))
+```
+
+
+#Visualizing my data
+
+##State of Residence vs State of Birth
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE, results="hide"}
+
+born<-df_clean[1,]
+
+born<-t(born)
+
+
+
+borndf<-as.data.frame(born)
+
+
+#install.packages("data.table")
+library(data.table)
+setDT(borndf, keep.rownames = TRUE)[]
+
+
+
+colnames(borndf)<-c("State","Population")
+
+borndf<-borndf[-c(1,2),]
+
+borndf$Status<-"Born-in"
+
+borndf$Population<-as.numeric(as.character(borndf$Population))
+
+
+
+actual<-df_clean[,1:2]
+
+actual<-actual[-1,]
+
+actual$Status<-"Actual"
+
+slope<-rbind(borndf,actual)
+
+slope$Population<-log(slope$Population)
+
+slope$State<-gsub("^\\s+|\\s+$", "", slope$State)
+
+
+
+slope$State2<-state.abb[match(slope$State,state.name)]
+
+slope$State2[slope$State=='District of Columbia']<-'DC'
+
+slope$State2[slope$State=='Puerto Rico']<-'PR'
+
+slope$Region<-state.region[match(slope$State,state.name)]
+
+slope$Region[slope$State=='District of Columbia']<-'South'
+
+slope$Region[slope$State=='Puerto Rico']<-NA
+
+
+```
+
+```{r,fig.height=5,fig.width=5, warning=FALSE}
+
+
+ggplot(data = subset(slope,Region=='Northeast'), aes(x = Status, y = Population, group = State2)) + 
+  geom_line(aes(color = State2, alpha = 1), size = 2) + 
+  geom_point(aes(color = State2), size = 4) +
+  geom_text_repel(data = subset(slope,Region=='Northeast') %>% filter(Status == "Actual"), 
+            aes(label = paste0(State2," - ", round(exp(Population)/1000000,digits=2)," mln")) , 
+            hjust = 1.5, 
+            fontface = "plain", 
+            size = 4) +
+  geom_text_repel(data = subset(slope,Region=='Northeast')%>% filter(Status == "Born-in"), 
+            aes(label = paste0(State2," - ", round(exp(Population)/1000000,digits=2)," mln")) , 
+            hjust = -.35, 
+            fontface = "plain", 
+            size = 4) +
+  scale_x_discrete(position = "top") +
+  theme_bw() +
+  # Format tweaks
+  # Remove the legend
+  theme(legend.position = "none") +
+  theme(panel.border     = element_blank()) +
+  theme(axis.title.y     = element_blank()) +
+  theme(axis.text.y      = element_blank()) +
+  theme(panel.grid.major.y = element_blank()) +
+  theme(panel.grid.minor.y = element_blank()) +
+  # Remove a few things from the x axis and increase font size
+  theme(axis.title.x     = element_blank()) +
+  theme(panel.grid.major.x = element_blank()) +
+  theme(axis.text.x.top      = element_text(size=12)) +
+  # Remove x & y tick marks
+  theme(axis.ticks       = element_blank()) +
+  ggtitle("2017 Northeast State Pop, Actual vs Born-in, on Log scale")+
+  theme(plot.title = element_text(size = 12, face = "bold",hjust = 0.5))
+
+ggplot(data = subset(slope,Region=='West'), aes(x = Status, y = Population, group = State2)) + 
+  geom_line(aes(color = State2, alpha = 1), size = 2) + 
+  geom_point(aes(color = State2), size = 4) +
+  geom_text_repel(data = subset(slope,Region=='West') %>% filter(Status == "Actual"), 
+            aes(label = paste0(State2," - ", round(exp(Population)/1000000,digits=2)," mln")) , 
+            hjust = 1.5, 
+            fontface = "plain", 
+            size = 4) +
+  geom_text_repel(data = subset(slope,Region=='West')%>% filter(Status == "Born-in"), 
+            aes(label = paste0(State2," - ", round(exp(Population)/1000000,digits=2)," mln")) , 
+            hjust = -.35, 
+            fontface = "plain", 
+            size = 4) +
+  scale_x_discrete(position = "top") +
+  theme_bw() +
+  # Format tweaks
+  # Remove the legend
+  theme(legend.position = "none") +
+  theme(panel.border     = element_blank()) +
+  theme(axis.title.y     = element_blank()) +
+  theme(axis.text.y      = element_blank()) +
+  theme(panel.grid.major.y = element_blank()) +
+  theme(panel.grid.minor.y = element_blank()) +
+  # Remove a few things from the x axis and increase font size
+  theme(axis.title.x     = element_blank()) +
+  theme(panel.grid.major.x = element_blank()) +
+  theme(axis.text.x.top      = element_text(size=14)) +
+  # Remove x & y tick marks
+  theme(axis.ticks       = element_blank()) +
+  ggtitle("2017 West State Pop, Current vs Born-in, on Log scale")+
+  theme(plot.title = element_text(size = 12, face = "bold",hjust = 0.5))
+
+ggplot(data = subset(slope,Region=='South'), aes(x = Status, y = Population, group = State2)) + 
+  geom_line(aes(color = State2, alpha = 1), size = 2) + 
+  geom_point(aes(color = State2), size = 4) +
+  geom_text_repel(data = subset(slope,Region=='South') %>% filter(Status == "Actual"), 
+            aes(label = paste0(State2," - ", round(exp(Population)/1000000,digits=2)," mln")) , 
+            hjust = 1.5, 
+            fontface = "plain", 
+            size = 4) +
+  geom_text_repel(data = subset(slope,Region=='South')%>% filter(Status == "Born-in"), 
+            aes(label = paste0(State2," - ", round(exp(Population)/1000000,digits=2)," mln")) , 
+            hjust = -.35, 
+            fontface = "plain", 
+            size = 4) +
+  scale_x_discrete(position = "top") +
+  theme_bw() +
+  # Format tweaks
+  # Remove the legend
+  theme(legend.position = "none") +
+  theme(panel.border     = element_blank()) +
+  theme(axis.title.y     = element_blank()) +
+  theme(axis.text.y      = element_blank()) +
+  theme(panel.grid.major.y = element_blank()) +
+  theme(panel.grid.minor.y = element_blank()) +
+  # Remove a few things from the x axis and increase font size
+  theme(axis.title.x     = element_blank()) +
+  theme(panel.grid.major.x = element_blank()) +
+  theme(axis.text.x.top      = element_text(size=12)) +
+  # Remove x & y tick marks
+  theme(axis.ticks       = element_blank()) +
+  ggtitle("2017 South State Pop, Current vs Born-in, on Log scale")+
+  theme(plot.title = element_text(size = 12, face = "bold",hjust = 0.5))
+
+ggplot(data = subset(slope,Region=='North Central'), aes(x = Status, y = Population, group = State2)) + 
+  geom_line(aes(color = State2, alpha = 1), size = 2) + 
+  geom_point(aes(color = State2), size = 4) +
+  geom_text_repel(data = subset(slope,Region=='North Central') %>% filter(Status == "Actual"), 
+            aes(label = paste0(State2," - ", round(exp(Population)/1000000,digits=2)," mln")) , 
+            hjust = 1.5, 
+            fontface = "plain", 
+            size = 4) +
+  geom_text_repel(data = subset(slope,Region=='North Central')%>% filter(Status == "Born-in"), 
+            aes(label = paste0(State2," - ", round(exp(Population)/1000000,digits=2)," mln")) , 
+            hjust = -.35, 
+            fontface = "plain", 
+            size = 4) +
+  scale_x_discrete(position = "top") +
+  theme_bw() +
+  # Format tweaks
+  # Remove the legend
+  theme(legend.position = "none") +
+  theme(panel.border     = element_blank()) +
+  theme(axis.title.y     = element_blank()) +
+  theme(axis.text.y      = element_blank()) +
+  theme(panel.grid.major.y = element_blank()) +
+  theme(panel.grid.minor.y = element_blank()) +
+  # Remove a few things from the x axis and increase font size
+  theme(axis.title.x     = element_blank()) +
+  theme(panel.grid.major.x = element_blank()) +
+  theme(axis.text.x.top      = element_text(size=12)) +
+  # Remove x & y tick marks
+  theme(axis.ticks       = element_blank()) +
+  ggtitle("2017 North Central State Pop, Current vs Born-in, on Log scale")+
+  theme(plot.title = element_text(size = 12, face = "bold",hjust = 0.5))
+```
+
+Observations:
+
+Net migration is not a major factor for Northeast. New Hampshire was the only state to gain considerable population due to migration. And DC (might not be technically Northaast) lost significant population.
+
+Most Western states gained population due to migration. Nevada gained the most, due to a low starting point. 
+
+South has somewhat mixed picture. Big gainers were Florida, Texas, Georgia and North Carolina. A couple of states lost population due to migration - West Virginia, Missisipi, and Lousina.
+
+North Central lost population accross most states. Even oil rich North Dakota lost population due to migration.
+
+```{r}
+borndf$State<-gsub("^\\s+|\\s+$", "", borndf$State)
+actual$State<-gsub("^\\s+|\\s+$", "", actual$State)
+#borndf$State
+#actual$State
+colnames(borndf)<-c("State","BPop","Status1")
+
+
+scat<-merge(borndf,actual,x.by="State",y.by="State")
+#scat
+scat<-scat[-40,]
+scat$Population<-log(scat$Population)
+scat$BPop<-log(scat$BPop)
+
+scat$Region<-state.region[match(scat$State,state.name)]
+
+scat$Region[scat$State=='District of Columbia']<-'South'
+# Scatterplot
+gg1 <- ggplot(scat, aes(x=Population, y=BPop)) + 
+  geom_point(aes(col=Region, size=Population)) + 
+  geom_smooth(method="loess", se=F) + 
+  xlim(c(12, 18)) + 
+  ylim(c(12, 18)) + 
+  labs(subtitle=str_wrap("Pop by Residence vs Pop by Birth",width=35), 
+       y="Pop by Birth, log", 
+       x="Pop by Residence, log", 
+       title="Scatterplot", 
+       caption = "Source: US Census")+  geom_abline(slope = 1)
+
+plot(gg1)
+
+```
+
+```{r}
+
+# Scatterplot
+gg1 <- ggplot(scat, aes(x=Population, y=BPop)) + 
+  geom_point(aes(color=Region)) + 
+  geom_smooth(method="loess", se=F) + 
+  xlim(c(12, 18)) + 
+  ylim(c(12, 18)) + 
+  labs(subtitle=str_wrap("Pop by Residence vs Pop by Birth",width=35), 
+       y="Pop by Birth, log", 
+       x="Pop by Residence, log", 
+       title="Scatterplot", 
+       caption = "Source: US Census")+facet_wrap(~Region)+ geom_abline(slope = 1)
+
+plot(gg1)
+
+
+```
+Western States are mostly below 45 degree line, confirming that they are gaining population because of migration. And most Northeastern and North Central States are above the line again confirming that they are losing population due to migration.
+
+##Which State Lost Population due to Migration, both domestic and foreign, and Which Gained.
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE, results="hide"}
+
+mdf<-merge(actual, borndf, by.x="State", by.y="State", sort = TRUE)
+
+mdf<-mdf[-40,]
+
+mdf$gl<-(mdf$Population-mdf$BPop)/1000000
+
+mdf[mdf$State2=='PR']<-NULL
+
+mdf$Region<-state.region[match(mdf$State,state.name)]
+
+mdf$Region[mdf$State=='District of Columbia']<-'South'
+
+mdf$Region[mdf$State=='Puerto Rico']<-NA
+
+```
+
+```{r}
+
+g <- ggplot(mdf, aes(x=reorder(State, -gl),y=gl))
+
+g + geom_bar(stat = "identity",fill = 'Dark blue')+ggtitle("Plot of USA States population gain/loss due to migration, as of 2017") +
+  xlab("States") + ylab("Population Gain/Loss, in mlns, as of 2017")+ theme(axis.text.x = element_text(angle = 90, hjust = 1))
+
+```
+
+```{r, fig.width=9, fig.height=6}
+
+mdf$gl<-mdf$gl*1000000/mdf$Population
+theme_set(theme_bw())
+# Data Prep
+mdf$z <- round((mdf$gl - mean(mdf$gl))/sd(mdf$gl), 2) 
+  # create new column for car names
+#mdf
+mdf$mpg_type <- ifelse(mdf$z< 0, "Lost", "Gained")  # above / below avg flag
+mdf <- mdf[order(mdf$z), ]  # sort
+mdf$State <- factor(mdf$State, levels = mdf$State)  # convert to factor to retain sorted order in plot.
+
+# Diverging Barcharts
+ggplot(mdf, aes(x=State, y=z, label=z)) + 
+  geom_bar(stat='identity', aes(fill=mpg_type), width=0.5)  +
+  scale_fill_manual(name="Migration Pop Gains, Adjusted for Pop Size", 
+                    labels = c("Above Average", "Below Average"), 
+                    values = c("Lost"="#00ba38", "Gained"="#f8766d")) + 
+  labs(subtitle="Normalised Population Gains due to Migration, Adjusted for Pop Size'", 
+       title= "Diverging Bars") + 
+  coord_flip()
+
+```
+
+Nevada, Florida, and Arizona gained the most net migrants, after adjustment for population size. DC, North Dakota, and West Virginia were the biggest losers. Surprisingly New York lost population due to migration, with internal out migrants offseting gains from immigrants outside of USA. North Dakota, which is experiencing oil boom, unexpectingly lost population due to migration.
+
+## Density Plot of States' Migration Population Loss/Gain, in millions
+
+```{r}
+
+ggplot(data=mdf)+geom_density(aes(x=gl), fill="grey50")+ ggtitle("Density Plot of States' Migration Pop Gain/Loss, Adjusted for Population Size") +  xlab("Migration Gain/Loss, millions") 
+
+```
+
+Migration gain/loss density function is heavily left-tailed. DC is skewing the results. There are a couple of states that gained heavily from migraion, both domestic and foreign . Most states though are close to 0. 
+
+```{r}
+
+theme_set(theme_classic())
+
+# Plot
+g <- ggplot(mdf, aes(Region, gl))
+g + geom_boxplot(varwidth=T, fill="plum") + 
+    labs(title="Box plot", 
+         subtitle="Pop Gain due to Migration Grouped by Region, Adjusted for Population Size",
+         caption="Source: Census",
+         x="Region",
+         y="Pop Gain due to Migration")
+
+```
+
+Another look at Migration Gain/Losses by Region. West and South are gaining.  With Northeast and North Central are close to breakeven. Dc and North Dakota are outliers.
+
+## % of People Born and still Residing in the State of Birth.
+
+```{r, fig.width=10,warning=FALSE}
+
+df_clean1$Stayed<-1
+
+for (i in (1:51)){
+  df_clean1[i+1,ncol(df_clean1)]<-df_clean1[i+1,i+2]/df_clean1[1,i+2]
+}
+
+g <- ggplot(df_clean1[-c(1,53),], aes(x=reorder(State, -Stayed),y=Stayed))
+# Number of cars in each class:
+g + geom_bar(stat = "identity",fill = 'Dark blue')+ggtitle("Plot of USA States by % of people who reside in a State of their Birth, as of 2017") +
+  xlab("States") + ylab("% of people who reside in a State of their Birth")+ theme(axis.text.x = element_text(angle = 90, hjust = 1))
+  
+```
+
+There must be something special about Texas - its residence do not want to leave the state. And DC apperantly sucks, residence run away from it.
+
+```{r}
+
+vp<-df_clean1[-c(1,53),]
+
+theme_set(theme_bw())
+vp$Region<-state.region[match(vp$State,state.name)]
+
+vp$Region[vp$State=='District of Columbia ']<-'South'
+
+
+# plot
+g <- ggplot(vp, aes(Region, Stayed))
+g + geom_violin() + 
+  labs(title="Violin plot", 
+       subtitle="% of People Born and Residing in the same State by Region",
+       caption="Source: Census",
+       x="Region",
+       y="% of People Born and Residing in the same State")
+
+```
+
+South is where peope are less mobile. All other regions are roughly equally mobile. Northeast gets a peculiar figuration because of DC.
+
+## % of State Residents Born outside of the State, As of 2017
+
+```{r, fig.width=8,warning=FALSE}
+
+df_clean1$Bout<-1
+
+for (i in (1:51)){
+  df_clean1[i+1,56]<-(df_clean[i+1,2]-df_clean1[i+1,i+2])/df_clean1[i+1,2]
+}
+
+g <- ggplot(df_clean1[-c(1,53),], aes(x=reorder(State, -Bout),y=Bout))
+# Number of cars in each class:
+g + geom_bar(stat = "identity",fill = 'Dark blue')+ggtitle("Plot of % of State Residents Born outside of the State, As of 2017") +
+  xlab("States") + ylab("% of people who were born out of state")+ theme(axis.text.x = element_text(angle = 90, hjust = 1))
+  
+```
+
+Nevada is a true state of new migrants. Over 70% were born out of the state. Lousina has very few new comers. Only ~20% were born out of the state.
+
+## % of State Residents Born in other US State, As of 2017
+
+```{r, fig.width=8,warning=FALSE}
+
+df_clean1$Bos<-1
+
+for (i in (1:51)){
+  df_clean1[i+1,57]<-(rowSums(df_clean1[i+1,3:54])-df_clean1[i+1,i+2])/df_clean1[i+1,2]
+}
+
+g <- ggplot(df_clean1[-c(1,53),], aes(x=reorder(State, -Bos),y=Bos))
+# Number of cars in each class:
+g + geom_bar(stat = "identity",fill = 'Dark blue')+ggtitle("Plot of % of State Residents Born in other US State, As of 2017") +
+  xlab("States") + ylab("% of people who were born in other US state")+ theme(axis.text.x = element_text(angle = 90, hjust = 1))
+  
+```
+
+Wyoming has the most domestic migrants. Even more than Nevada. It appears that Natives abominate New York; therefore, such low numbers appear.
+
+## % of State Residents came from other US Regions, As of 2017
+
+```{r, fig.width=8,warning=FALSE}
+
+df_bir<-df_clean1[,-c(2,54:60)]
+
+df_bir1<-df_bir%>%gather("StateFrom","Value",-c(State))
+
+df_bir1$Region<-state.region[match(df_bir1$State,state.name)]
+
+df_bir1$Region[df_bir1$State=='District of Columbia ']<-'South'
+
+df_bir1$RegionF<-state.region[match(df_bir1$StateFrom,state.name)]
+
+df_bir1$RegionF[df_bir1$StateFrom=='District of Columbia ']<-'South'
+
+library(dplyr)
+library(plyr)
+df_bir2<-df_bir1%>%filter(df_bir1$Region!=df_bir1$RegionF)%>%dplyr::select(State,Value)
+
+cdata <- ddply(df_bir2, c("State"), summarise,
+               N    = sum(Value))
+
+df_bir3<-merge(cdata, df_clean1, by.x="State", by.y="State")
+
+df_bir3$dr<-df_bir3$N/df_bir3$Population
+
+g <- ggplot(df_bir3, aes(x=reorder(State, -dr),y=dr))
+# Number of cars in each class:
+g + geom_bar(stat = "identity",fill = 'Dark blue')+ggtitle("Plot of % of State Residents that came from another US Region, As of 2017") +
+  xlab("States") + ylab("% of residents who came from different US Region")+ theme(axis.text.x = element_text(angle = 90, hjust = 1))
+  
+```
+
+US has distinct subcultures that can be traced to different regions. So, to move from one region to another a person might have to adapt to local specifics. Also, it is move expensive to move father away, which is more likely when relocating to a different region.
+
+Colorado attracts many migrants from other US regions, indicating that the state has a lot to offer. DC being a major political center also attracts migrants from other regions. Delaware is a surprise to me. I am not sure why it has so many migrants from other regions. 
+
+On another side of the spectrium, there is New Jersey, Louisiana, and New York, which do not seem to be an attractive distination for major relocation.
+
+
+## % of State of Birth Residence who have relocated to different Region, As of 2017
+
+```{r, fig.width=8,warning=FALSE, echo=FALSE, results="hide"}
+
+df_bir<-df_clean1[,-c(2,54:60)]
+
+df_bir1<-df_bir%>%gather("StateFrom","Value",-c(State))
+
+df_bir1$Region<-state.region[match(df_bir1$State,state.name)]
+
+df_bir1$Region[df_bir1$State=='District of Columbia ']<-'South'
+
+df_bir1$RegionF<-state.region[match(df_bir1$StateFrom,state.name)]
+
+df_bir1$RegionF[df_bir1$StateFrom=='District of Columbia ']<-'South'
+
+library(dplyr)
+df_bir2<-df_bir1%>%filter(df_bir1$Region!=df_bir1$RegionF)%>%dplyr::select(StateFrom,Value)
+
+cdata <- ddply(df_bir2, c("StateFrom"), summarise,
+               N= sum(Value))
+
+df_t<-t(df_clean1[1,-c(1:2,54:61)])
+
+df_t<-as.data.frame(df_t)
+
+setDT(df_t, keep.rownames = TRUE)[]
+
+colnames(df_t)<-c("State","Pop")
+
+df_bir3<-merge(cdata, df_t, by.x="StateFrom", by.y="State")
+
+df_bir3$dr<-df_bir3$N/df_bir3$Pop
+
+```
+
+```{r}
+
+g <- ggplot(df_bir3, aes(x=reorder(StateFrom, -dr),y=dr))
+# Number of cars in each class:
+g + geom_bar(stat = "identity",fill = 'Dark blue')+ggtitle("Plot of % Born In State Residents who has relocated to different US Region") +
+  xlab("States") + ylab("% Born In State Resid's who has moved to dif Reg")+ theme(axis.text=element_text(size=10), axis.text.x = element_text(angle = 90, hjust = 1),axis.title.y = element_text(size = rel(0.8), angle = 90))
+  
+```
+
+DC seems to be an outlier. Surprisingly, North Dakota with booming economy has almost 1/3 of residents who left the state for another Region. New York is very high on the list too. 
+
+Southern states such as Georgia, North Carolina, and Louisina show very little mobility.
+
+
+## % of Foreign Born Residents by US States, As of 2017
+
+```{r, fig.width=8,warning=FALSE}
+
+df_clean1$Boos<-1
+
+for (i in (1:51)){
+  df_clean1[i+1,58]<-(df_clean1[i+1,2]-rowSums(df_clean1[i+1,3:54]))/df_clean1[i+1,2]
+}
+g <- ggplot(df_clean1[-c(1,53),], aes(x=reorder(State, -Boos),y=Boos))
+# Number of cars in each class:
+g + geom_bar(stat = "identity",fill = 'Dark blue')+ggtitle("Plot of % of Foreign Born Residents by US States, As of 2017") +
+  xlab("States") + ylab("% of Foreign Born Residents")+ theme(axis.text.x = element_text(angle = 90, hjust = 1))
+  
+```
+
+California, New York, and New Jersey have the most foreign immigrants, while West Virginia has practically none.
+
+## Scatterplot of % of Domestic Migrants vs % of Foreign Born Migrants
+
+```{r}
+#df_clean1
+#cor(df_clean1[-c(1,53),]$Bos,df_clean1[-c(1,53),]$Boos)
+df_clean1$Region<-state.region[match(df_clean1$State,state.name)]
+
+df_clean1$Region[df_clean1$State=='District of Columbia ']<-'South'
+# Scatterplot
+cor<-df_clean1[-c(1,53),]
+#cor
+gg1 <- ggplot(cor, aes(x=Bos, y=Boos)) + 
+  geom_point(aes(col=Region, size=Population)) + 
+  geom_smooth(method="loess", se=F) + 
+  xlim(c(0, 0.6)) + 
+  ylim(c(0, 0.4)) + 
+  labs(subtitle=str_wrap("% of Domestic Migrants vs % of Foreign Born Migrants",width=35), 
+       y="% of Foreign Born Migrants", 
+       x="% of Domestic Migrants", 
+       title="Scatterplot", 
+       caption = "Source: US Census")
+
+plot(gg1)
+
+```
+
+It is a surprise to me, but there is no correlation between internal and external migrations. It appears that they are driven by different forces. One thing that we can notice from the plot that foreign migrants prefer states with higher population (bigger sized dots), while internal migrants prefer states with smaller population (smaller sized dots).
+
+## States by total migration (immgrants+emmigrants)/[total people born in state], As of 2017
+
+```{r, fig.width=8,warning=FALSE}
+
+df_clean1$Btm<-1
+
+for (i in (1:51)){
+  df_clean1[i+1,ncol(df_clean1)]<-((df_clean1[1,i+2]-df_clean1[i+1,i+2])+(df_clean[i+1,2]-df_clean1[i+1,i+2]))/df_clean[1,i+2]
+  
+}
+
+
+
+g <- ggplot(df_clean1[-c(1,53),], aes(x=reorder(State, -Btm),y=Btm))
+# Number of cars in each class:
+g + geom_bar(stat = "identity",fill = 'Dark blue')+ggtitle("Plot of % of Total Migrants (immigrants & emiigrants) by US States, As of 2017") +
+  xlab("States") + ylab("% of people who moved in out of State")+ theme(axis.text.x = element_text(angle = 90, hjust = 1))
+  
+```
+
+Neveda sees a lot of mobility - people just keep moving in and out. While Lousina sees the least. 
+
+## US States by Migration Status
+
+```{r, fig.width=11, fig.height=7, echo=FALSE, message=FALSE, warning=FALSE}
+
+
+
+df_clean1$Bin<-1-df_clean1$Bout
+
+
+
+df_long<-df_clean1[-c(1,53),]%>%dplyr::select(State,Bin,Bos,Boos)%>%gather("Status","Value",-State)
+
+df_long<-df_long%>%arrange(Status)
+
+df_long <- plyr::ddply(df_long, .(State),
+                     transform, pos = cumsum(Value) - (0.5 * Value))
+
+df_long$Status[df_long$Status=='Boos']<-'2. Born outside of USA'
+df_long$Status[df_long$Status=='Bin']<-'1. Born in a State'
+
+df_long$Status[df_long$Status=='Bos']<-'3. Born in other US State'
+
+df_long <- ddply(df_long, .(State),
+                     transform, pos = cumsum(Value) - (0.5 * Value))
+
+ggplot() + geom_bar(aes(y = Value, x = State, fill = Status), data = df_long,
+                           stat="identity")+geom_text(data=df_long, aes(x = State, y = 1-pos,
+                                             label = paste0(round(Value*100,0),"%")), size=3)+ theme(axis.text.x = element_text(angle = 90, hjust = 1),legend.position="bottom", legend.direction="horizontal",
+                   legend.title = element_blank())+ labs(x="State", y="Percentage")+
+  ggtitle("State Population by Migration Status")
+
+
+
+```
+
+Just to summarize what we have already seen - USA is truly diverse country, even when it comes to migration patterns. 
+
+1) We have states such as Lousina that sees very few new comers. 
+2) And then you have Nevada that has very few locally born natives. Nevada is new melting pot, where internal and foreign migrants live together. 
+3) Then, there is New York with 24% population being foreign born, and only 13% born in other US state.
+4) Opposite of New York is Wyoming - a lot of internal and very little external migration.
+5) West Virginia has vurtially no foreign immigrants.
+6) Opposite of West Virginia, California has 28% of its residents foreign born
+
+
+## Which State contribited most Migrants to Another State?
+
+```{r, message=FALSE, warning=FALSE}
+
+df_clean1$statef<-''
+#df_clean1
+for (i in (1:51)){
+  
+  df_clean1[i+1,ncol(df_clean1)]<-tolower(colnames(df_clean1[,-c(i+2,2)])[which.max(df_clean1[i+1,-c(i+2,2)])])
+}
+
+df_clean1m<-df_clean1[-c(1,3,13,53),]
+df_clean1m$State<-tolower(df_clean1m$State)
+mystate
+mystatef<-as.character(df_clean1m$State)
+mystatef<-replace(mystatef, mystatef=='massachusetts', 'massachusetts:main')
+mystatef<-replace(mystatef, mystatef=='michigan', 'michigan:south')
+mystatef<-replace(mystatef, mystatef=='new york', 'new york:main')
+
+mystatef
+mystatef<-replace(mystatef, mystatef=='north carolina', 'north carolina:main')
+mystatef<-replace(mystatef, mystatef=='virginia', 'virginia:main')
+mystatef<-replace(mystatef, mystatef=='washington', 'washington:main')
+mystatef<-replace(mystatef, mystatef=='district of columbia ', 'district of columbia')
+mylabelf<-as.character(df_clean1m$statef)
+#df_clean1m$statef
+length(mystatef)
+length(mylabelf)
+library("maps")
+mystatef
+map.text("state", regions=mystatef, labels=mylabelf)
+title(main = "For Each State: Where Do Domestic Migrants Come From?")
+
+```
+
+We can see that New Yorkers moved to the both coasts. They predominate in California, Florida, North Carolina, and Virginia. Californianas moved to Texas, Nevada (now we know where Nevada gets all these migrants), Arizona, and Utah. Illinosians are moving to Wisconsin, Iowa, Missouri, and Tennessee.
+
+Interestingly, that Wyoming - land of internal migration - gets most people from ...Colorado. Colorado is a beautiful place, why would you want to move to somewhere else!
+
+Lousina, that gets very few migrants, gets most from Texas. New York, which is apperantly repelent to internal migrants, gets most of them from New Jersey. I guess New Jerseians are the only Americans that can stomach New York.
+
+New Hemshire which is the most attractive state to migrants on East Coast gets most of them from New York.
+
+North Dakota which has had oil boom recently gets the most migrants from Minnesota. 
+
+Disitrict of Columbia that loses a lot of population is migrating to Maryland.
+
+```{r}
+op <- par(mar = c(9,4,4,2) + 0.1)
+
+barplot(table(mylabel),main="States Contributing most Migrants to Other States",ylab="Freqency",las=2,cex.axis=0.8, cex.names=0.8)
+par(op)
+
+```
+
+California and New York are top contributors to the most states.
+
+## For Each State: Where are the Most Migrants Move to?
+
+```{r,fig.width=10}
+df_clean2<-df_clean1[,-c(2,4,14,54:70)]
+df_clean2<-df_clean2[-c(1,3,13,53),]
+df_clean2$st<-''
+
+for (i in (1:49)){
+    df_clean2[i,51]<-tolower(df_clean2[-i,1][which.max(df_clean2[-i,i+1])])
+}
+
+df_clean2$State<-tolower(df_clean2$State)
+
+mystatet<-as.character(df_clean2$State)
+mystatet<-replace(mystate, mystate=='massachusetts', 'massachusetts:main')
+mystatet<-replace(mystate, mystate=='michigan', 'michigan:south')
+mystatet<-replace(mystate, mystate=='new york', 'new york:main')
+mystatet<-replace(mystate, mystate=='north carolina', 'north carolina:main')
+mystatet<-replace(mystate, mystate=='virginia', 'virginia:main')
+mystatet<-replace(mystate, mystate=='washington', 'washington:main')
+mystatet<-replace(mystate, mystate=='district of columbia ', 'district of columbia')
+
+mylabelt<-as.character(df_clean2$st)
+
+library("maps")
+   # map of four states
+
+map.text("state", regions=mystatet, labels=mylabelt)
+title(main = "For Each State: Where Do Domestic Migrants Move To?")
+```
+
+Florida is a top destination for a bunch of states: NY, PA, MA, NJ, and IL. California is a top destination for Nevada, Arizona, Washington, and Utah. Texas is for California, New Mexico, Oklahoma, and Louisiana. Surprisingly, Nevada and Wyoming is not a top destination for any of the states. While New York is a top destination for Vermont.
+
+```{r}
+op <- par(mar = c(8,4,4,2) + 0.1)
+barplot(table(mylabel),main="Which States are Top Destinations for Other States?",ylab="Freqency",las=2)
+  
+par(op)
+```
+
+Florida, famous for being a retirement destination, tops as preferred location by most states.
+
+## States migrant population by state of birth
+
+```{r, message=FALSE, warning=FALSE}
+#install.packages("treemapify")
+#install.packages("ggplotify")
+library(treemapify)
+#df_clean1
+df_cleant<-df_clean1[-c(1,53),]
+df_cleant<-df_cleant[,-c(2,54:ncol(df_cleant))]
+for (i in (1:50)){
+  
+  df_cleant[i,i+1]<-0
+}
+df_clean1
+#df_cleant
+df_cleant1<-df_cleant%>%gather("StateFrom","Value",-State)
+df_cleant1$RegionFrom<-state.region[match(df_cleant1$StateFrom,state.name)]
+
+df_cleant1$RegionFrom[df_cleant1$StateFrom=='District of Columbia ']<-'South'
+
+States<-as.character(df_cleant1$State)
+
+df_cleant1<-df_cleant1%>%arrange(State,RegionFrom,Value)
+
+
+
+# should be 51!!!
+
+for (i in (1:1)){
+
+
+mydata<-df_cleant1%>%filter(State==States[i])
+
+myplot<-ggplot(mydata, aes(area = Value, fill = RegionFrom, label = StateFrom,
+                subgroup = RegionFrom)) +
+  geom_treemap() +
+  geom_treemap_subgroup_border() +
+  geom_treemap_subgroup_text(place = "centre", grow = T, alpha = 0.5, colour =
+                             "black", fontface = "italic", min.size = 0) +
+  geom_treemap_text(colour = "white", place = "topleft", reflow = T)+
+  labs(
+    title = paste0(mydata$State," migrant population by state of birth"),
+    caption = "The area of each tile represents how many internal migrants were born in a state",
+    fill = "Region")
+    
+    print(myplot)
+#myplot    
+    
+  }
+```
+
+Now we have a lot of details on internal migration preferences. If we look at New York, we see that migrants to New York are very diverse. Most come from Northeast, such as NJ, PA, MA, CT. But FL, NC, TX, CA, and OH contribute as well. 
+
+## Migrants by state of distination
+
+```{r}
+#install.packages("treemapify")
+#install.packages("ggplotify")
+#library(treemapify)
+
+
+df_cleant1$RegionTo<-state.region[match(df_cleant1$State,state.name)]
+
+df_cleant1$RegionTo[df_cleant1$State=='District of Columbia ']<-'South'
+
+
+
+df_cleant1<-df_cleant1%>%arrange(StateFrom,RegionTo,Value)
+
+for (i in (1:1)){
+
+
+mydata<-df_cleant1%>%filter(StateFrom==States[i])
+
+myplot<-ggplot(mydata, aes(area = Value, fill = RegionTo, label = State,
+                subgroup = RegionTo)) +
+  geom_treemap() +
+  geom_treemap_subgroup_border() +
+  geom_treemap_subgroup_text(place = "centre", grow = T, alpha = 0.5, colour =
+                             "black", fontface = "italic", min.size = 0) +
+  geom_treemap_text(colour = "white", place = "topleft", reflow = T)+
+  labs(
+    title = paste0(mydata$StateFrom," migrant population by state of destination"),
+    caption = "The area of each tile represents how many internal migrants moved to a state",
+    fill = "Region")
+    
+    print(myplot)
+#myplot    
+    
+  }
+```
+
+
+## Does state's population size influence migration behaviour?
+
+```{r, message=FALSE, warning=FALSE}
+
+library(rvest) 
+library(dplyr)
+library(knitr)
+library(rcompanion)
+library(MASS)
+library(tidyverse)
+library(caret)
+
+URL <- "https://en.wikipedia.org/wiki/List_of_states_and_territories_of_the_United_States_by_population_density"
+
+temp<-URL%>%read_html%>%html_nodes("table")
+
+Dens<-html_table(temp[[1]],header = NA,fill=TRUE)
+
+Dens<-Dens[,c(1,4,7,9)]
+
+names(Dens) <- c("State", "Density","Population","Area")
+Dens$Area[Dens$State=='California']<-substr(Dens$Area,1,7)
+Dens[, 3:4] <- sapply(Dens[, 3:4], as.character)
+Dens[, 3:4] <- sapply(Dens[, 3:4], function(x) as.numeric(gsub(",", "",x)))
+
+
+States<-df_clean1[,c(1,55:59)]
+States<-States[-53,]
+
+Dens1<-merge(Dens, States, by.x="State", by.y="State", sort = TRUE)
+
+options(scipen=999)  # turn-off scientific notation like 1e+48
+
+theme_set(theme_bw())  # pre-set the bw theme.
+
+Dens1$Region<-state.region[match(Dens1$State,state.name)]
+
+Dens1$Region[Dens1$State=='District of Columbia ']<-'South'
+
+# Scatterplot
+gg1 <- ggplot(Dens1, aes(x=log(Population), y=Stayed)) + 
+  geom_point(aes(col=Region, size=Density)) + 
+  geom_smooth(method="loess", se=F) + 
+  xlim(c(12, 18)) + 
+  ylim(c(0.3, 0.9)) + 
+  labs(subtitle=str_wrap("Pop vs % of Pop who Resides in State where they were Born",width=35), 
+       y="% Born and Residing in the same state", 
+       x="Log(Population)", 
+       title="Scatterplot", 
+       caption = "Source: US Census")
+
+plot(gg1)
+
+
+```
+
+We have strong correlation between state's population size and % of people born there who choose to reside there as well. It is possible that more populous, urban states provide more opportunities which makes them attractive place to reside in.
+
+## Migration and 2016 Presidential Elections
+
+```{r}
+
+
+
+StatesP<-df_clean1[,c(1,55:ncol(df_clean1))]
+StatesP<-StatesP[-c(1,53),]
+StatesP$pe<-'T'
+
+StatesP$pe[c(5:9,12,14,20,21,22,24,29,30,31,32,33,38,40,46,47,48)]<-'C'
+
+StatesP
+
+ggplot(StatesP, aes(pe, Stayed))+
+geom_violin() + 
+  labs(title="Violin plot", 
+       subtitle="% of People Born and Residing in the same State by 2016 Presidential Election Voting",
+       caption="Source: Census",
+       x="States voted for Trump vs Clinton",
+       y="% of People Born and Residing in the same State")
+
+ggplot(StatesP, aes(pe, Boos))+
+ geom_violin() + 
+  labs(title="Violin plot", 
+       subtitle="States by % Foreign Born People vs 2016 Presidential Elections",
+       caption="Source: Census",
+       x="States voted for Trump vs Clinton",
+       y="% of Foreign Born Residents")
+
+
+
+
+```
+
+States that voted for Trump on average are less mobile.
+
+Trump's states have significantly less foreign immigrants.
+
+## Migration: North Vs South, East vs West
+
+```{r, message=FALSE, warning=FALSE}
+
+library(rvest) 
+library(dplyr)
+library(knitr)
+library(rcompanion)
+library(MASS)
+library(tidyverse)
+library(caret)
+
+URL <- "https://en.wikipedia.org/wiki/List_of_geographic_centers_of_the_United_States"
+
+temp<-URL%>%read_html%>%html_nodes("table")
+
+tax<-html_table(temp[[2]],header = NA,fill=TRUE)
+
+
+
+tax<-tax[,c(1,3)]
+
+
+
+names(tax) <- c("State", "Coor")
+
+form<-function(x){as.numeric(gsub("([0-9]+).*$", "\\1",x))}
+
+tax$lon<-form(substr(tax$Coor,1,3))+ifelse(form(substr(tax$Coor,4,5))<10,form(substr(tax$Coor,4,5))/10,form(substr(tax$Coor,4,5))/100)
+
+tax$lat<-form(substr(tax$Coor,12,14))
+
+tax1<-tax%>%dplyr::select(State,lon,lat)
+
+
+df_l<-df_clean1[,-c(2,54:ncol(df_clean1))]
+
+df_l<-df_l[-c(1,53),]
+
+
+
+df_l1<-df_l%>%gather("StateFrom","Value",-c(State))
+
+df_l1$Region<-state.region[match(df_l1$State,state.name)]
+
+df_l1$Region[df_l1$State=='District of Columbia ']<-'South'
+
+df_l1$RegionF<-state.region[match(df_l1$StateFrom,state.name)]
+
+df_l1$RegionF[df_l1$StateFrom=='District of Columbia ']<-'South'
+
+tax2<-merge(tax1, df_l1, by.x="State", by.y="State", sort = TRUE)
+
+colnames(tax1)<-c("State","lonf","latf")
+
+
+
+tax3<-merge(tax2, tax1, by.x="StateFrom", by.y="State", sort = TRUE)
+
+tax3$NS<-ifelse((tax3$lon-tax3$lonf)>7.5,'1N',ifelse((tax3$lon-tax3$lonf)>0,'2N',
+ifelse((tax3$lon-tax3$lonf)>-7.5,'3S','4S')))
+
+tax3$EW<-ifelse((tax3$lat-tax3$latf)>10,'4N',ifelse((tax3$lat-tax3$latf)>0,'3N',
+ifelse((tax3$lat-tax3$latf)>-10,'2S','1S')))
+
+tax3$Value<-ifelse(tax3$State==tax3$StateFrom,0,tax3$Value)
+
+
+
+NS<-aggregate(Value/1000000~NS,tax3,sum)
+EW<-aggregate(Value/1000000~EW,tax3,sum)
+#install.packages("waffle")
+library(waffle)
+waffle(setNames(as.vector(NS$Value),
+                c(
+                  paste('North, 500+ mls (',as.character(round(NS[1,2],0)),'mln)'),
+                  paste('North, 0-500 mls (',as.character(round(NS[2,2],0)),'mln)'),
+                  paste('South 0-500 mls (',as.character(round(NS[3,2],0)),'mln)'),
+                  paste('South 500+ mls (',as.character(round(NS[4,2],0)),'mln)')
+                )), rows=8, size=1, 
+       title="US Migrationt: Moving North vs South", 
+       xlab="One square == 1m ppl")
+
+waffle(setNames(as.vector(EW$Value),c(
+                  paste('East, 500+ mls (',as.character(round(EW[1,2],0)),'mln)'),
+                  paste('East, 0-500 mls (',as.character(round(EW[2,2],0)),'mln)'),
+                  paste('West 0-500 mls (',as.character(round(EW[3,2],0)),'mln)'),
+                  paste('West 500+ mls (',as.character(round(EW[4,2],0)),'mln)')
+                )), rows=8, size=1, 
+       title="US Migration: Moving East vs West", 
+       xlab="One square == 1m ppl")
+
+```
+There is a clear pattern of people moving South. The top big move to South (more than 500 miles) was from New York to Florida - 1.6 million. And the top big move to North (more than 500 miles) was from California to Washington - 0.6 million. The biggest move to the West was from New York to California - 0.6 million.
+
+When it comes East-West direction, pattern is not as clear. However, Americans who make a big move (more than 500 miles) still prefer West. The top big move to the West was from New York to California - 0.6 million. The top big move to East was from California to Texas - 0.8 million.
+
+
+
+## Migration vs Elevation
+
+```{r, message=FALSE, warning=FALSE}
+
+library(rvest) 
+library(dplyr)
+library(knitr)
+library(rcompanion)
+library(MASS)
+library(tidyverse)
+library(caret)
+
+URL <- "https://en.wikipedia.org/wiki/List_of_U.S._states_and_territories_by_elevation"
+
+temp<-URL%>%read_html%>%html_nodes("table")
+
+Dens<-html_table(temp[[1]],header = NA,fill=TRUE)
+
+
+
+Dens<-Dens[,c(1,7)]
+colnames(Dens) <- c("State", "Density")
+
+Dens[, 2] <- sapply(Dens[, 2], as.character)
+library(DescTools)
+#Dens[, 2] <- sapply(substr(Dens[, 2],1,5), function(x) as.numeric(gsub("f","",gsub(",","",x))))
+Dens$e<-StrTrim(gsub("t","",gsub("f","",gsub(",", "",substr(Dens[,2],1,5)))))
+#substr(Dens[, 2],1,5)
+#Dens$e<-form(substr(Dens$Density,1,5))
+#gsub("  ","",gsub("f","",gsub(",", "",substr(Dens[,2],1,5))))
+#form(substr(Dens$Density,1,5))
+Dens$e<-as.integer(gsub("([0-9]+).*$", "\\1", Dens$e))
+
+States<-df_clean1[,c(1:2,55:59)]
+States<-States[-c(1,53),]
+
+Dens1<-merge(Dens, States, by.x="State", by.y="State", sort = TRUE)
+
+options(scipen=999)  # turn-off scientific notation like 1e+48
+
+theme_set(theme_bw())  # pre-set the bw theme.
+
+Dens1$Region<-state.region[match(Dens1$State,state.name)]
+
+Dens1$Region[Dens1$State=='District of Columbia ']<-'South'
+Dens1<-Dens1%>%dplyr::select(State,e)
+#cor(Dens1$Stayed,Dens1$e)
+
+a<-merge(df_cleant1,Dens1,by.x="State",by.y="State")
+colnames(Dens1)<-c("State","ef")
+
+a<-merge(a,Dens1,by.x="StateFrom",by.y="State")
+
+a$hl<-ifelse((a$e-a$ef)>1000,'1mh',ifelse((a$e-a$ef)>=0,'2h',ifelse((a$e-a$ef)>=-1000,'3l','4ml')))
+
+
+hl<-aggregate(Value/1000000~hl,a,sum)
+
+#install.packages("waffle")
+library(waffle)
+
+
+
+```
+
+Migrating Americans do not have clear preference by altitude. There was some migration to mountanious states, such as Arizona. At the same time, low-elevation states, such as Florida attracts a lot migrants as well.
+
+## Migration vs American Human Development Index
+
+```{r, message=FALSE, warning=FALSE}
+
+library(rvest) 
+library(dplyr)
+library(knitr)
+library(rcompanion)
+library(MASS)
+library(tidyverse)
+library(caret)
+
+URL <- "https://en.wikipedia.org/wiki/List_of_U.S._states_by_American_Human_Development_Index"
+
+temp<-URL%>%read_html%>%html_nodes("table")
+
+Dens<-html_table(temp[[1]],header = NA,fill=TRUE)
+
+
+Dens<-Dens[,c(3,4)]
+colnames(Dens) <- c("State", "Density")
+
+Dens[, 2] <- sapply(Dens[, 2], as.character)
+#library(DescTools)
+#Dens[, 2] <- sapply(substr(Dens[, 2],1,5), function(x) as.numeric(gsub("f","",gsub(",","",x))))
+
+Dens$Density<-as.numeric(Dens$Density)
+
+
+States<-df_clean1[,c(1:2,55:59)]
+States<-States[-c(1,53),]
+
+Dens1<-merge(Dens, States, by.x="State", by.y="State", sort = TRUE)
+
+options(scipen=999)  # turn-off scientific notation like 1e+48
+
+theme_set(theme_bw())  # pre-set the bw theme.
+
+Dens1$Region<-state.region[match(Dens1$State,state.name)]
+
+Dens1$Region[Dens1$State=='District of Columbia ']<-'South'
+Dens1<-Dens1%>%dplyr::select(State,Density)
+#cor(Dens1$Stayed,Dens1$e)
+
+a<-merge(df_cleant1,Dens1,by.x="State",by.y="State")
+colnames(Dens1)<-c("State","df")
+
+a<-merge(a,Dens1,by.x="StateFrom",by.y="State")
+
+a$hl<-ifelse((a$Density-a$df)/a$df>0.1,'1mh',ifelse((a$Density-a$df)/a$df>=0,'2h',ifelse((a$Density-a$df)/a$df>-0.1,'3l','4ml')))
+
+
+hl<-aggregate(Value/1000000~hl,a,sum)
+
+#install.packages("waffle")
+
+library(waffle)
+waffle(setNames(as.vector(hl$Value),
+                c(
+                  paste( 'Much Higher HDI, 10%+ (',as.character(round(hl[1,2],0)),'mln)' ),
+                  paste( 'Higher HDI, 0-10% (',as.character(round(hl[2,2],0)),'mln)' ),
+                   paste( 'Lower HDI, 0-10% (',as.character(round(hl[3,2],0)),'mln)' ),
+                     paste( 'Much Lower HDI, 10%+ (',as.character(round(hl[4,2],0)),'mln)' )
+                  )
+                ),rows=8, size=1,  
+       title="US Migrationt: Migration by American HDI (Hum Dev Index)", 
+       xlab="One square == 1m ppl"
+       )
+
+
+```
+
+Surprisingly, but Americans do not migrate based HDI score of the destination state. One of the examples, migration from New York to Florida.
+
+## Migration vs Median Household Income
+
+```{r, message=FALSE, warning=FALSE}
+
+library(rvest) 
+library(dplyr)
+library(knitr)
+library(rcompanion)
+library(MASS)
+library(tidyverse)
+library(caret)
+
+URL <- "https://en.wikipedia.org/wiki/List_of_U.S._states_and_territories_by_income"
+
+temp<-URL%>%read_html%>%html_nodes("table")
+
+Dens<-html_table(temp[[3]],header = NA,fill=TRUE)
+
+
+
+Dens<-Dens[,c(2,3)]
+colnames(Dens) <- c("State", "Density")
+
+Dens[, 2] <- sapply(Dens[, 2], as.character)
+#library(DescTools)
+#Dens[, 2] <- sapply(substr(Dens[, 2],1,5), function(x) as.numeric(gsub("f","",gsub(",","",x))))
+
+Dens$Density<-as.numeric(gsub('[$,]', '', Dens$Density))
+
+
+States<-df_clean1[,c(1:2,55:59)]
+States<-States[-c(1,53),]
+
+Dens1<-merge(Dens, States, by.x="State", by.y="State", sort = TRUE)
+
+options(scipen=999)  # turn-off scientific notation like 1e+48
+
+theme_set(theme_bw())  # pre-set the bw theme.
+
+Dens1$Region<-state.region[match(Dens1$State,state.name)]
+
+Dens1$Region[Dens1$State=='District of Columbia ']<-'South'
+Dens1<-Dens1%>%dplyr::select(State,Density)
+#cor(Dens1$Stayed,Dens1$e)
+
+a<-merge(df_cleant1,Dens1,by.x="State",by.y="State")
+colnames(Dens1)<-c("State","df")
+
+a<-merge(a,Dens1,by.x="StateFrom",by.y="State")
+
+a$hl<-ifelse((a$Density-a$df)/a$df>0.15,'1mh',ifelse((a$Density-a$df)/a$df>=0,'2h',ifelse((a$Density-a$df)/a$df>-0.15,'3l','4ml')))
+
+
+hl<-aggregate(Value/1000000~hl,a,sum)
+
+#install.packages("waffle")
+
+library(waffle)
+waffle(setNames(as.vector(hl$Value),
+                c(
+                  paste( 'Much Higher Med House Income, 15%+ (',as.character(round(hl[1,2],0)),'mln)' ),
+                  paste( 'Higher MHI, 0-15% (',as.character(round(hl[2,2],0)),'mln)' ),
+                   paste( 'Lower MHI, 0-15% (',as.character(round(hl[3,2],0)),'mln)' ),
+                     paste( 'Much Lower MHI, 15%+ (',as.character(round(hl[4,2],0)),'mln)' )
+                  )
+                ),rows=8, size=1,  
+       title="US Migrationt: Migration based on Median Household Income", 
+       xlab="One square == 1m ppl"
+       )
+
+
+```
+
+Median Household Income is not a driving force behind migration. Possible spliting migration into retirees vs no-retirees will make us to come to a different conclusion. The top group going to the state with much lower MHI is New Yorkers going to Florida - 1.6 million. And top group that going to the state with much higher MHI is New Yorkers agian going to New Jersey - 1 million.
+
+## Migration vs State Budget Expenduture
+
+```{r, message=FALSE, warning=FALSE}
+
+library(rvest) 
+library(dplyr)
+library(knitr)
+library(rcompanion)
+library(MASS)
+library(tidyverse)
+library(caret)
+
+URL <- "https://en.wikipedia.org/wiki/List_of_U.S._state_budgets"
+
+temp<-URL%>%read_html%>%html_nodes("table")
+
+Dens<-html_table(temp[[1]],header = NA,fill=TRUE)
+
+
+
+Dens<-Dens[,c(1,5)]
+colnames(Dens) <- c("State", "Density")
+
+Dens[, 2] <- sapply(Dens[, 2], as.character)
+#library(DescTools)
+#Dens[, 2] <- sapply(substr(Dens[, 2],1,5), function(x) as.numeric(gsub("f","",gsub(",","",x))))
+
+Dens$Density<-as.numeric(gsub('[$,]', '', Dens$Density))
+
+
+States<-df_clean1[,c(1:2,55:59)]
+States<-States[-c(1,53),]
+
+Dens1<-merge(Dens, States, by.x="State", by.y="State", sort = TRUE)
+
+options(scipen=999)  # turn-off scientific notation like 1e+48
+
+theme_set(theme_bw())  # pre-set the bw theme.
+
+Dens1$Region<-state.region[match(Dens1$State,state.name)]
+
+Dens1$Region[Dens1$State=='District of Columbia ']<-'South'
+Dens1<-Dens1%>%dplyr::select(State,Density)
+#cor(Dens1$Stayed,Dens1$e)
+
+a<-merge(df_cleant1,Dens1,by.x="State",by.y="State")
+colnames(Dens1)<-c("State","df")
+
+a<-merge(a,Dens1,by.x="StateFrom",by.y="State")
+
+a$hl<-ifelse((a$Density-a$df)/a$df>0.4,'1mh',ifelse((a$Density-a$df)/a$df>=0,'2h',ifelse((a$Density-a$df)/a$df>-0.4,'3l','4ml')))
+
+
+hl<-aggregate(Value/1000000~hl,a,sum)
+
+#install.packages("waffle")
+
+library(waffle)
+waffle(setNames(as.vector(hl$Value),
+                c(
+                  paste( 'Much Higher State Gov per Capita Expenditure, 40%+ (',as.character(round(hl[1,2],0)),'mln)' ),
+                  paste( 'Higher State Gov per Cap Exp, 0-40% (',as.character(round(hl[2,2],0)),'mln)' ),
+                   paste( 'Lower State Gov per Cap Exp, 0-40% (',as.character(round(hl[3,2],0)),'mln)' ),
+                     paste( 'Much Lower State Gov per Cap Exp, 40%+ (',as.character(round(hl[4,2],0)),'mln)' )
+                  )
+                ),rows=8, size=1,  
+       title="US Migrationt: Migration vs State Gov per Capita Expenditure", 
+       xlab="One square == 1m ppl"
+       )
+
+
+```
+
+Again, It is hard to categorically say if State Gov Expenduture influences domestic migration. I also do not feel comfartable with the reliability of underlaying data. 
+
+## Migration vs Irreligiosity
+
+```{r, message=FALSE, warning=FALSE}
+
+library(rvest) 
+library(dplyr)
+library(knitr)
+library(rcompanion)
+library(MASS)
+library(tidyverse)
+library(caret)
+
+URL <- "https://en.wikipedia.org/wiki/Irreligion_in_the_United_States#Demographics"
+
+temp<-URL%>%read_html%>%html_nodes("table")
+
+Dens<-html_table(temp[[5]],header = NA,fill=TRUE)
+
+Dens<-Dens[,c(2,4)]
+
+names(Dens) <- c("State", "Density")
+Dens$Area[Dens$State=='California']<-substr(Dens$Area,1,7)
+Dens[, 2] <- sapply(Dens[, 2], as.character)
+Dens[, 2] <- sapply(Dens[, 2], function(x) as.numeric(gsub("%", "",x)))
+
+
+States<-df_clean1[,c(1:2,55:59)]
+States<-States[-53,]
+
+Dens1<-merge(Dens, States, by.x="State", by.y="State", sort = TRUE)
+
+options(scipen=999)  # turn-off scientific notation like 1e+48
+
+theme_set(theme_bw())  # pre-set the bw theme.
+
+Dens1$Region<-state.region[match(Dens1$State,state.name)]
+
+Dens1$Region[Dens1$State=='District of Columbia ']<-'South'
+
+# Scatterplot
+gg1 <- ggplot(Dens1, aes(x=Density, y=Bout)) + 
+  geom_point(aes(col=Region, size=Population)) + 
+  geom_smooth(method="loess", se=F) + 
+  xlim(c(0, 50)) + 
+  ylim(c(0, 0.8)) + 
+  labs(subtitle=str_wrap("Irreligiousity vs % of Migrant Residents, domestic and foreign",width=35), 
+       y="% Migrant Residents, domestic and foreign", 
+       x="% Irreligious", 
+       title="Scatterplot", 
+       caption = "Source: US Census")
+
+plot(gg1)
+
+Dens1
+```
+
+Medium strength correlation indicates that overall less religious states have more migrants.
+
+# Conclusion
+
+To summarize what we have learned from the data and visualizations is:
+
+1) The most important point for me is that USA is extremly deverse country when it comes to migration behaviour. 
+2) There is the clouster of states that are big gainers from migration - Nevada, Florida, and Texas; Florida is the most attractive destination for domestic migrants in 11 states. Generally, americans prefer to migrate to states which are to South from them.
+3) The states thar are the biggest losers due to migration are DC, North Dakota, and West Virginia, after adjustment for population size
+3) New York is a very unique state when it comes to migration - a big gainer from foreign immmigration and a big loser from domestic migration. 
+4) People born in Texas have the lowest mobility in USA, generally South has lower mobility.
+5) Foreign born and domestic born migrants have different preferences
+6) In Nevada over 70% of residents were born outside of the state; other states with a lot of residents born outside of their boders are Florida and DC
+7) Woyming, Nevada, and New Hemshire attracts a lot of domestic migrants, proportinaly their size; Californians and New Yorkers are the biggest domestic migrant group in 9 states each; 
+8) Colorado, DC, Delaware, and Florida has the most domestic migrants coming from other US regions, NJ, NY, and Lousina have the least(proportinally their population size)
+9) Foreign born migrants prefer California, New York, and New Jersey, while they stay away from West Virginia, MIssisipi, and Montana.
+10) People born in big size states show lower mobility;
+11) States that voted for Trump in 2016 have lower mobility and have fewer foreign immigrants
+12) States which are more irreligious also appear to attract more migrants
